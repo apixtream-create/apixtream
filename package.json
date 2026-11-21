@@ -1,0 +1,10 @@
+{
+  "name": "iracemaflix-xtream-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serviço independente para catálogo, pesquisa e playback Xtream do IracemaFlix.",
+  "main": "index.js",
+  "scripts": { "start": "node index.js", "test": "node --test" },
+  "engines": { "node": ">=22.19.0" },
+  "dependencies": { "express": "^4.21.2" }
+}
