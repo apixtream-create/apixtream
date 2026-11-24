@@ -1,15 +1,201 @@
 {
   "openapi": "3.1.0",
-  "info": { "title": "IracemaFlix Xtream API", "version": "1.0.0", "description": "Catálogo e busca Xtream; playback usa tokens cifrados e temporários." },
-  "servers": [{ "url": "https://SEU-HOST-XTREAM" }],
-  "components": { "securitySchemes": { "BearerAuth": { "type": "http", "scheme": "bearer" } } },
-  "security": [{ "BearerAuth": [] }],
+  "info": {
+    "title": "IracemaFlix Xtream API",
+    "version": "1.0.0",
+    "description": "Catálogo e busca Xtream; playback usa tokens cifrados e temporários."
+  },
+  "servers": [
+    {
+      "url": "https://SEU-HOST-XTREAM"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
   "paths": {
-    "/healthz": { "get": { "security": [], "summary": "Healthcheck", "responses": { "200": { "description": "Serviço ativo" } } } },
-    "/openapi.json": { "get": { "security": [], "summary": "Esta especificação", "responses": { "200": { "description": "OpenAPI JSON" } } } },
-    "/api/v1/sources": { "get": { "summary": "Fontes habilitadas (sem credenciais)", "responses": { "200": { "description": "Lista de IDs e nomes" } } } },
-    "/api/v1/catalog/{kind}": { "get": { "summary": "Catálogo paginado", "parameters": [{ "name": "kind", "in": "path", "required": true, "schema": { "type": "string", "enum": ["live", "vod", "series"] } }, { "name": "limit", "in": "query", "schema": { "type": "integer", "maximum": 500 } }, { "name": "offset", "in": "query", "schema": { "type": "integer" } }, { "name": "search", "in": "query", "schema": { "type": "string" } }, { "name": "sourceId", "in": "query", "schema": { "type": "string" } }], "responses": { "200": { "description": "Itens normalizados com playbackPath" } } } },
-    "/api/v1/streams/search": { "post": { "summary": "Buscar stream por identificador ou título", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["mediaType"], "properties": { "mediaType": { "type": "string", "enum": ["movie", "tv"] }, "tmdbId": { "type": "string" }, "imdbId": { "type": "string" }, "title": { "type": "string" }, "season": { "type": "integer" }, "episode": { "type": "integer" } } } } } }, "responses": { "200": { "description": "Streams e fontes com falha" }, "400": { "description": "Parâmetros inválidos" }, "502": { "description": "Fontes indisponíveis" } } } },
-    "/play/{token}": { "get": { "security": [], "summary": "Redirecionar token de playback cifrado e temporário", "parameters": [{ "name": "token", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "302": { "description": "Redirecionamento para a fonte Xtream" }, "410": { "description": "Token inválido ou expirado" } } } }
+    "/healthz": {
+      "get": {
+        "security": [],
+        "summary": "Healthcheck",
+        "responses": {
+          "200": {
+            "description": "Serviço ativo"
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "security": [],
+        "summary": "Esta especificação",
+        "responses": {
+          "200": {
+            "description": "OpenAPI JSON"
+          }
+        }
+      }
+    },
+    "/api/v1/sources": {
+      "get": {
+        "summary": "Fontes habilitadas (sem credenciais)",
+        "responses": {
+          "200": {
+            "description": "Lista de IDs e nomes"
+          }
+        }
+      }
+    },
+    "/api/v1/catalog/{kind}": {
+      "get": {
+        "summary": "Catálogo paginado com seleção sequencial de uma fonte",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "live",
+                "vod",
+                "series"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "maximum": 500
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sourceId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Consulta exclusivamente esta fonte, sem fallback."
+          },
+          {
+            "name": "categoryName",
+            "in": "query",
+            "description": "Filtra pelo nome da categoria retornada pelo servidor Xtream.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Itens normalizados, categoryName, selectedSource e diagnóstico sanitizado de tentativas."
+          }
+        },
+        "description": "Sem sourceId, tenta XTREAM_CATALOG_PRIORITY e para na primeira fonte com correspondência; com sourceId, consulta apenas a fonte indicada. categoryName filtra pelo nome da categoria e reconhece Anime/Animação e Dorama."
+      }
+    },
+    "/api/v1/streams/search": {
+      "post": {
+        "summary": "Buscar stream por identificador ou título",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "mediaType"
+                ],
+                "properties": {
+                  "mediaType": {
+                    "type": "string",
+                    "enum": [
+                      "movie",
+                      "tv"
+                    ]
+                  },
+                  "tmdbId": {
+                    "type": "string"
+                  },
+                  "imdbId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "season": {
+                    "type": "integer"
+                  },
+                  "episode": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Streams e fontes com falha"
+          },
+          "400": {
+            "description": "Parâmetros inválidos"
+          },
+          "502": {
+            "description": "Fontes indisponíveis"
+          }
+        }
+      }
+    },
+    "/play/{token}": {
+      "get": {
+        "security": [],
+        "summary": "Redirecionar token de playback cifrado e temporário",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirecionamento para a fonte Xtream"
+          },
+          "410": {
+            "description": "Token inválido ou expirado"
+          }
+        }
+      }
+    }
   }
 }

@@ -8,6 +8,8 @@ const { configureHttp, clampInt, safeHttpUrl } = require('./http.cjs');
 
 const VERSION = '1.0.0';
 const CATALOG_ACTIONS = Object.freeze({ live: 'get_live_streams', vod: 'get_vod_streams', series: 'get_series' });
+const CATEGORY_ACTIONS = Object.freeze({ live: 'get_live_categories', vod: 'get_vod_categories', series: 'get_series_categories' });
+const DEFAULT_CATALOG_PRIORITY = Object.freeze(['clbtw']);
 
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -50,6 +52,18 @@ function normalizeTitle(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().replace(/\b(dublado|dublada|legendado|legendada|dual audio|720p|1080p|2160p)\b/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
+function categoryMatches(actualValue, requestedValue) {
+  const actual = normalizeTitle(actualValue);
+  const requested = normalizeTitle(requestedValue);
+  if (!requested) return true;
+  if (actual.includes(requested)) return true;
+  const aliases = {
+    anime: ['animes', 'animacao', 'animacoes'],
+    dorama: ['doramas', 'kdrama', 'kdramas', 'drama asiatico', 'dramas asiaticos']
+  };
+  return (aliases[requested] || []).some((alias) => actual.includes(alias));
 }
 
 function abortAfter(ms) {
@@ -124,6 +138,10 @@ function createApp({ config = null, sources: sourceOverride = null, fetchImpl = 
   const serviceConfig = loadServiceConfig();
   const sources = sourceOverride || loadSources(null, appConfig);
   const catalogCache = new Map();
+  const categoryCache = new Map();
+  const catalogPriority = [...new Set((Array.isArray(appConfig.XTREAM_CATALOG_PRIORITY)
+    ? appConfig.XTREAM_CATALOG_PRIORITY
+    : DEFAULT_CATALOG_PRIORITY).map((id) => String(id).trim()).filter(Boolean))];
   const tokenSecret = String(serviceConfig?.playbackTokenSecret || '');
   if (Buffer.byteLength(tokenSecret, 'utf8') < 32) throw new Error('Configure um playbackTokenSecret de pelo menos 32 bytes em config/service-config.json.');
   const timeoutMs = clampInt(appConfig.XTREAM_TIMEOUT_MS, 25_000, 1_000, 25_000);
@@ -168,6 +186,28 @@ function createApp({ config = null, sources: sourceOverride = null, fetchImpl = 
     return value;
   }
 
+  async function getCategories(source, kind, remainingMs = timeoutMs) {
+    const action = CATEGORY_ACTIONS[kind];
+    if (!action) return [];
+    const key = `${source.id}:${kind}:categories`;
+    const cached = categoryCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    const value = await requestXtream(source, { action }, Math.min(5_000, remainingMs));
+    if (!Array.isArray(value)) throw new Error('categorias upstream inválidas');
+    if (cacheMs > 0) categoryCache.set(key, { value, expiresAt: Date.now() + cacheMs });
+    return value;
+  }
+
+  function safeFailureCode(error) {
+    const message = String(error?.message || error || '');
+    const status = message.match(/status\s+(\d{3})/i)?.[1];
+    if (status) return `HTTP_${status}`;
+    if (/timeout|prazo|abort/i.test(message)) return 'TIMEOUT';
+    if (/json/i.test(message)) return 'INVALID_JSON';
+    if (/payload/i.test(message)) return 'INVALID_PAYLOAD';
+    return 'UPSTREAM_ERROR';
+  }
+
   function safeSource(source) { return { id: source.id, name: source.name }; }
   function makePlaybackPath(source, kind, id, extension) {
     const token = makePlaybackToken({ sourceId: source.id, kind, itemId: String(id), extension: String(extension || '') }, tokenSecret);
@@ -179,40 +219,87 @@ function createApp({ config = null, sources: sourceOverride = null, fetchImpl = 
   app.get('/api/v1/catalog/:kind', async (req, res) => {
     const kind = String(req.params.kind || '');
     if (!Object.hasOwn(CATALOG_ACTIONS, kind)) return res.status(400).json({ error: 'kind deve ser live, vod ou series' });
-    const selected = req.query.sourceId ? sources.filter((source) => source.id === String(req.query.sourceId)) : sources;
-    if (req.query.sourceId && !selected.length) return res.status(404).json({ error: 'Fonte Xtream não encontrada' });
-    if (!selected.length) return res.status(503).json({ error: 'Nenhuma fonte Xtream configurada' });
+    const sourceId = String(req.query.sourceId || '').trim();
+    const selected = sourceId
+      ? sources.filter((source) => source.id === sourceId)
+      : catalogPriority.map((id) => sources.find((source) => source.id === id)).filter(Boolean);
+    if (sourceId && !selected.length) return res.status(404).json({ error: 'Fonte Xtream não encontrada' });
+    if (!selected.length) return res.status(503).json({ error: 'Nenhuma fonte Xtream configurada para o catálogo' });
     const limit = clampInt(req.query.limit, 100, 1, 500);
     const offset = clampInt(req.query.offset, 0, 0, 1_000_000);
     const search = normalizeTitle(req.query.search);
     const categoryId = String(req.query.categoryId || '');
+    const categoryName = normalizeTitle(req.query.categoryName || '');
     const deadlineAt = Date.now() + Math.min(searchDeadlineMs, imdbStreamTimeoutMs);
-    const results = await mapWithinDeadline(selected, sourceConcurrency, deadlineAt, async (source, remainingMs) => {
-      try { return { source, items: await getCatalog(source, kind, false, remainingMs) }; }
-      catch { return { source, items: [], failed: true }; }
-    });
-    const failed = results.filter((result) => result.failed);
-    const items = results.flatMap(({ source, items: raw }) => raw.map((item) => {
-      const id = itemId(item, kind);
-      const extension = String(item.container_extension || (kind === 'live' ? 'ts' : kind === 'series' ? '' : 'mp4'));
-      const mapped = {
-        id, sourceId: source.id, sourceName: source.name,
-        name: String(item.name || item.title || '').slice(0, 300),
-        categoryId: String(item.category_id || ''),
-        streamType: kind,
-        extension: /^[A-Za-z0-9]{1,8}$/.test(extension) ? extension : '',
-        image: String(item.stream_icon || item.cover || item.movie_image || '').slice(0, 2000),
-        tmdbId: field(item, ['tmdb_id', 'tmdb']),
-        imdbId: field(item, ['imdb_id', 'imdb']),
-        year: field(item, ['year', 'releaseDate', 'releasedate'])
-      };
-      if (kind !== 'series' && id) mapped.playbackPath = makePlaybackPath(source, kind, id, extension);
-      return mapped;
-    })).filter((item) => item.id && (!categoryId || item.categoryId === categoryId) && (!search || normalizeTitle(item.name).includes(search)));
+    const failedSources = [];
+    const failedSourceDetails = [];
+    const attemptedSources = [];
+    let selectedSource = null;
+    let items = [];
+
+    for (const source of selected) {
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) break;
+      try {
+        const [rawItems, rawCategories] = await Promise.all([
+          getCatalog(source, kind, false, remainingMs),
+          getCategories(source, kind, remainingMs).catch(() => [])
+        ]);
+        const categoryNames = new Map(rawCategories.map((category) => [String(category.category_id), String(category.category_name || '')]));
+        const sourceItems = rawItems.map((item) => {
+          const id = itemId(item, kind);
+          const itemCategoryId = String(item.category_id || '');
+          const category = String(item.category_name || item.categoryName || categoryNames.get(itemCategoryId) || '');
+          const extension = String(item.container_extension || (kind === 'live' ? 'ts' : kind === 'series' ? '' : 'mp4'));
+          const mapped = {
+            id, sourceId: source.id, sourceName: source.name,
+            name: String(item.name || item.title || '').slice(0, 300),
+            categoryId: itemCategoryId, categoryName: category,
+            streamType: kind,
+            extension: /^[A-Za-z0-9]{1,8}$/.test(extension) ? extension : '',
+            image: String(item.stream_icon || item.cover || item.movie_image || '').slice(0, 2000),
+            tmdbId: field(item, ['tmdb_id', 'tmdb']),
+            imdbId: field(item, ['imdb_id', 'imdb']),
+            year: field(item, ['year', 'releaseDate', 'releasedate'])
+          };
+          if (kind !== 'series' && id) mapped.playbackPath = makePlaybackPath(source, kind, id, extension);
+          return mapped;
+        }).filter((item) => item.id && (!categoryId || item.categoryId === categoryId)
+          && (!categoryName || categoryMatches(item.categoryName, categoryName))
+          && (!search || normalizeTitle(`${item.name} ${item.categoryName}`).includes(search)));
+        attemptedSources.push({ id: source.id, status: sourceItems.length ? 'selected' : rawItems.length ? 'no_match' : 'empty', count: sourceItems.length });
+        if (sourceItems.length) {
+          selectedSource = safeSource(source);
+          items = sourceItems;
+          break;
+        }
+      } catch (error) {
+        const code = safeFailureCode(error);
+        failedSources.push(source.id);
+        failedSourceDetails.push({ id: source.id, code });
+        attemptedSources.push({ id: source.id, status: 'failed', code, count: 0 });
+      }
+    }
+
     const page = items.slice(offset, offset + limit);
-    const completedIds = new Set(results.map((result) => result.source?.id).filter(Boolean));
-    const failedSources = [...failed.map(({ source }) => source.id), ...selected.filter((source) => !completedIds.has(source.id)).map((source) => source.id)];
-    res.json({ kind, total: items.length, offset, limit, items: page, failedSources, partial: failedSources.length > 0 });
+    const result = {
+      kind, total: items.length, offset, limit, selectedSource,
+      items: page, failedSources, failedSourceDetails, attemptedSources,
+      partial: failedSources.length > 0
+    };
+    console.info('[xtream-catalog] ' + JSON.stringify({
+      requestId: req.requestId,
+      kind,
+      selectedSource: selectedSource?.id || null,
+      attemptedSources,
+      failedSources: failedSourceDetails,
+      total: items.length,
+      returned: page.length,
+      offset,
+      limit,
+      filters: { search: Boolean(search), categoryId: Boolean(categoryId), categoryName: Boolean(categoryName) }
+    }));
+    res.json(result);
   });
 
   app.post('/api/v1/streams/search', async (req, res) => {
