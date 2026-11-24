@@ -37,7 +37,6 @@
     "clbtw",
     "azqkdk-xtream",
     "cdn4k-live-89625",
-    "cdn4k-live-aripai",
     "primary",
     "one-tv",
     "oneplayfastpro",
@@ -134,5 +133,8 @@
   "IMDB_M3U_TIMEOUT_MS": 25000,
   "EMBED_CANAIS_TIMEOUT_MS": 25000,
   "LIVE_TV_CAPTURE_TIMEOUT_MS": 25000,
-  "M3U_SOURCE_BODY_TIMEOUT_MS": 120000
+  "M3U_SOURCE_BODY_TIMEOUT_MS": 120000,
+  "XTREAM_CATALOG_PRIORITY": [
+    "clbtw"
+  ]
 }
