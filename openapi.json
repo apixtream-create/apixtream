@@ -122,7 +122,7 @@
     },
     "/api/v1/streams/search": {
       "post": {
-        "summary": "Buscar stream por identificador ou título",
+        "summary": "Buscar stream somente nas fontes Xtream prioritárias",
         "requestBody": {
           "required": true,
           "content": {
@@ -154,6 +154,14 @@
                   },
                   "episode": {
                     "type": "integer"
+                  },
+                  "sourceIds": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "IDs solicitados; são intersectados com XTREAM_SEARCH_PRIORITY e nunca ampliam a busca para fontes não prioritárias."
                   }
                 }
               }
@@ -162,7 +170,7 @@
         },
         "responses": {
           "200": {
-            "description": "Streams e fontes com falha"
+            "description": "Streams, searchedSourceIds, attemptedSources, failedSources e unattemptedSources. Retorna 502 apenas quando todas as prioridades selecionadas falham."
           },
           "400": {
             "description": "Parâmetros inválidos"

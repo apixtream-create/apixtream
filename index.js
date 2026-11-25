@@ -142,6 +142,9 @@ function createApp({ config = null, sources: sourceOverride = null, fetchImpl = 
   const catalogPriority = [...new Set((Array.isArray(appConfig.XTREAM_CATALOG_PRIORITY)
     ? appConfig.XTREAM_CATALOG_PRIORITY
     : DEFAULT_CATALOG_PRIORITY).map((id) => String(id).trim()).filter(Boolean))];
+  const searchPriorityIds = [...new Set((Array.isArray(appConfig.XTREAM_SEARCH_PRIORITY)
+    ? appConfig.XTREAM_SEARCH_PRIORITY
+    : []).map((id) => String(id).trim()).filter(Boolean))];
   const tokenSecret = String(serviceConfig?.playbackTokenSecret || '');
   if (Buffer.byteLength(tokenSecret, 'utf8') < 32) throw new Error('Configure um playbackTokenSecret de pelo menos 32 bytes em config/service-config.json.');
   const timeoutMs = clampInt(appConfig.XTREAM_TIMEOUT_MS, 25_000, 1_000, 25_000);
@@ -314,10 +317,18 @@ function createApp({ config = null, sources: sourceOverride = null, fetchImpl = 
     const season = body.season == null ? null : clampInt(body.season, 0, 1, 100);
     const episode = body.episode == null ? null : clampInt(body.episode, 0, 1, 10_000);
     if (mediaType === 'tv' && ((season == null) !== (episode == null))) return res.status(400).json({ error: 'Informe season e episode juntos para séries' });
-    if (!sources.length) return res.status(503).json({ streams: [], failedSources: [], error: 'Nenhuma fonte Xtream configurada' });
+    if (body.sourceIds != null && (!Array.isArray(body.sourceIds) || body.sourceIds.length > 50 || body.sourceIds.some((id) => typeof id !== 'string'))) {
+      return res.status(400).json({ error: 'sourceIds deve ser uma lista de até 50 IDs' });
+    }
+    const requestedIds = body.sourceIds == null ? null : new Set(body.sourceIds.map((id) => id.trim()));
+    const searchSources = searchPriorityIds
+      .filter((id) => !requestedIds || requestedIds.has(id))
+      .map((id) => sources.find((source) => source.id === id))
+      .filter(Boolean);
+    if (!searchSources.length) return res.status(503).json({ streams: [], failedSources: [], searchedSourceIds: [], error: 'Nenhuma fonte prioritária Xtream configurada para a busca' });
 
     const deadlineAt = Date.now() + searchDeadlineMs;
-    const outputs = await mapWithinDeadline(sources, sourceConcurrency, deadlineAt, async (source) => {
+    const outputs = await mapWithinDeadline(searchSources, sourceConcurrency, deadlineAt, async (source) => {
       try {
         const kind = mediaType === 'movie' ? 'vod' : 'series';
         const catalog = await getCatalog(source, kind, false, deadlineAt - Date.now());
@@ -369,9 +380,28 @@ function createApp({ config = null, sources: sourceOverride = null, fetchImpl = 
     });
     const streams = outputs.flatMap((result) => result.streams);
     const completedIds = new Set(outputs.map((result) => result.source?.id).filter(Boolean));
-    const failedSources = [...outputs.filter((result) => result.failed).map((result) => result.source.id), ...sources.filter((source) => !completedIds.has(source.id)).map((source) => source.id)];
-    if (!streams.length && failedSources.length === sources.length) return res.status(502).json({ streams: [], failedSources, error: 'As fontes Xtream não responderam' });
-    res.json({ streams, failedSources, partial: failedSources.length > 0 });
+    const failedSources = outputs.filter((result) => result.failed).map((result) => result.source.id);
+    const unattemptedSources = searchSources.filter((source) => !completedIds.has(source.id)).map((source) => source.id);
+    const attemptedSources = outputs.map((result) => ({
+      id: result.source.id,
+      status: result.failed ? 'failed' : result.streams.length ? 'matched' : 'empty',
+      streams: result.streams.length
+    }));
+    const searchedSourceIds = searchSources.map((source) => source.id);
+    const allPrioritiesFailed = !streams.length && failedSources.length === searchSources.length && unattemptedSources.length === 0;
+    console.info('[xtream-stream-search] ' + JSON.stringify({
+      requestId: req.requestId,
+      mediaType,
+      searchedSourceIds,
+      attemptedSources,
+      failedSources,
+      unattemptedSources,
+      streams: streams.length,
+      allPrioritiesFailed,
+      elapsedMs: searchDeadlineMs - Math.max(0, deadlineAt - Date.now())
+    }));
+    if (allPrioritiesFailed) return res.status(502).json({ streams: [], failedSources, unattemptedSources, searchedSourceIds, attemptedSources, allPrioritiesFailed: true, error: 'Todas as fontes prioritárias Xtream falharam' });
+    res.json({ streams, failedSources, unattemptedSources, searchedSourceIds, attemptedSources, allPrioritiesFailed: false, partial: failedSources.length > 0 || unattemptedSources.length > 0 });
   });
 
   app.get('/play/:token', (req, res) => {
