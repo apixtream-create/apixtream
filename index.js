@@ -150,7 +150,7 @@ function createApp({ config = null, sources: sourceOverride = null, fetchImpl = 
   const timeoutMs = clampInt(appConfig.XTREAM_TIMEOUT_MS, 25_000, 1_000, 25_000);
   const searchDeadlineMs = clampInt(appConfig.XTREAM_IMDB_TIMEOUT_MS, 25_000, 1_000, 60_000);
   const imdbStreamTimeoutMs = clampInt(appConfig.IMDB_STREAM_TIMEOUT_MS, 25_000, 1_000, 60_000);
-  const sourceConcurrency = 3;
+  const sourceConcurrency = clampInt(appConfig.XTREAM_SOURCE_CONCURRENCY, 8, 1, 8);
   const cacheMs = clampInt(appConfig.CACHE_TTL_MS, 900_000, 0, 600_000);
 
   configureHttp(app, 'iracemaflix-xtream-api', {}, { rateLimit: 60, openApi: true });
