@@ -2,9 +2,9 @@
   "id": "5ce",
   "sourceName": "5CE",
   "base": "http://5ce.me",
-  "username": "982268151",
-  "password": "ativo1357",
-  "playlistUrl": "http://5ce.me/get.php?username=982268151&password=ativo1357&type=m3u_plus",
+  "username": "Fabiomachado01",
+  "password": "Felipe01",
+  "playlistUrl": "http://5ce.me:80/get.php?username=Fabiomachado01&password=Felipe01&type=m3u_plus",
   "xtreamTimeoutMs": 25000,
   "m3uTimeoutMs": 25000
 }
