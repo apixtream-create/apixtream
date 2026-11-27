@@ -23,20 +23,20 @@
     "framextv"
   ],
   "XTREAM_SEARCH_PRIORITY": [
+    "cerejadoce",
+    "one-tv",
+    "oneplayfastpro",
+    "4kplay",
+    "clbtw",
+    "murbax",
+    "afg154",
+    "teleflixhd",
     "anbinvlink",
     "5ce",
     "cms-central",
     "ultclub",
-    "4kplay",
-    "teleflixhd",
-    "afg154",
-    "murbax",
-    "cerejadoce",
     "claxys",
-    "clbtw",
     "azqkdk-xtream",
-    "one-tv",
-    "oneplayfastpro",
     "env-beleco",
     "env-novomundo",
     "lbplay"
@@ -133,5 +133,6 @@
   "M3U_SOURCE_BODY_TIMEOUT_MS": 120000,
   "XTREAM_CATALOG_PRIORITY": [
     "clbtw"
-  ]
+  ],
+  "XTREAM_SOURCE_CONCURRENCY": 8
 }
