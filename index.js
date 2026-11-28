@@ -376,7 +376,10 @@ function createApp({ config = null, sources: sourceOverride = null, fetchImpl = 
           });
         }
         return { source, streams };
-      } catch { return { source, streams: [], failed: true }; }
+      } catch (error) {
+        // Falha definitiva desta fonte: não repetir nem manter a vaga ocupada.
+        return { source, streams: [], failed: true, errorCode: safeFailureCode(error) };
+      }
     });
     const streams = outputs.flatMap((result) => result.streams);
     const completedIds = new Set(outputs.map((result) => result.source?.id).filter(Boolean));
@@ -385,6 +388,7 @@ function createApp({ config = null, sources: sourceOverride = null, fetchImpl = 
     const attemptedSources = outputs.map((result) => ({
       id: result.source.id,
       status: result.failed ? 'failed' : result.streams.length ? 'matched' : 'empty',
+      ...(result.failed && result.errorCode ? { code: result.errorCode } : {}),
       streams: result.streams.length
     }));
     const searchedSourceIds = searchSources.map((source) => source.id);
